@@ -24,10 +24,10 @@
 #include "CayenneLPP.h"
 
 // Gnat Asset Tracker gnat1
-const char *appEui = "70B3D57ED000964D";
-const char *appKey = "7DE66B18F7105B19A1427AFEB2514597";
-const char *devEui = "3739323254377a09";
-
+const char *appEui = "---------------";
+const char *appKey = "---------------";
+const char *devEui = "---------------";
+   
 CayenneLPP myLPP(64);
 
 // Cricket pin assignments
@@ -43,6 +43,7 @@ GNSSLocation myLocation;
 GNSSSatellites mySatellites;
 
 volatile bool isTracking = false;
+volatile bool onReceive = false;
 
 TimerMillis NoMotionActivityTimer;  // instantiate low-frequency timer
 TimerMillis InMotionActivityTimer;  // instantiate high-frequency timer
@@ -119,13 +120,12 @@ bool ActivityOn = true;
 
 BMA400 BMA400(BMA400_intPin1, BMA400_intPin2); // instantiate BMA400 class
 
-
 void setup()
 {
   /* Enable USB UART */
   Serial.begin(115200);
   delay(4000);
-  Serial.println("Serial enabled!");
+  Serial.println("===== Serial enabled =====");
 
   /* Get LoRa/LoRaWAN ID for SX1276 */
   STM32L0.getUID(UID);
@@ -186,20 +186,17 @@ void setup()
   Serial.print("VDDA = "); Serial.print(VDDA, 2); Serial.println(" V");
   Serial.print("VBAT = "); Serial.print(VBAT, 2); Serial.println(" V");
   if(VBUS ==  1)  Serial.println("USB Connected!"); 
-  Serial.print("STM32L0 MCU Temperature = "); Serial.println(STM32L0Temp, 2);
-  Serial.println(" ");
+  Serial.print("STM32L0 MCU Temperature is "); Serial.print(STM32L0Temp, 2); Serial.print(" degrees C");
   
-
   // Read the BMA400 Chip ID register, this is a good test of communication
   Serial.println("BMA400 accelerometer...");
   byte c = BMA400.getChipID();  // Read CHIP_ID register for BMA400
-  Serial.print("BMA400 "); Serial.print("I AM "); Serial.print(c, HEX); Serial.print(" I should be "); Serial.println(0x90, HEX);
-  Serial.println(" ");
+  Serial.print("BMA400 "); Serial.print("I am "); Serial.print(c, HEX); Serial.print(" I should be "); Serial.println(0x90, HEX);
   delay(1000); 
 
   if(c == 0x90) // check if all I2C sensors with WHO_AM_I have acknowledged
   {
-   Serial.println("BMA400 is online..."); Serial.println(" ");
+   Serial.println("BMA400 is online...");
    
    aRes = BMA400.getAres(Ascale);                                       // get sensor resolutions, only need to do this once
    BMA400.resetBMA400();                                                // software reset before initialization
@@ -209,7 +206,7 @@ void setup()
    delay(1000);                                                         // give some time to read the screen
    BMA400.CompensationBMA400(Ascale, SR, normal_Mode, OSR, acc_filter, offset); // quickly estimate offset bias in normal mode
    BMA400.initBMA400(Ascale, SR, power_Mode, OSR, acc_filter);          // Initialize sensor in desired mode for application                     
-
+ 
   }
   else 
   {
@@ -217,9 +214,9 @@ void setup()
   }
 
    // set alarm to update the RTC periodically
-  RTC.setAlarmTime(0, 0, 0);
-//  RTC.enableAlarm(RTC.MATCH_SS);  // alarm once per minute
-    RTC.enableAlarm(RTC.MATCH_ANY); // alarm once a second
+//  RTC.setAlarmTime(0, 0, 0);
+    RTC.enableAlarm(RTC.MATCH_SS);  // alarm once per minute
+//    RTC.enableAlarm(RTC.MATCH_ANY); // alarm once a second
 
   RTC.attachInterrupt(alarmMatch);
 
@@ -239,30 +236,95 @@ void setup()
     - Korea      KR920
     - US         US915 (64 + 8 channels)
    */
-    LoRaWAN.begin(US915);
+  
+    LoRaWAN.begin(EU868);
     LoRaWAN.setADR(false);
     LoRaWAN.setDataRate(1);
-    LoRaWAN.setTxPower(10);
-    LoRaWAN.setSubBand(1); // 1 for MTCAP, 2 for TT gateways
-
-    LoRaWAN.joinOTAA(appEui, appKey, devEui);
-
-    LoRaTimer.start(callbackLoRaTx, 300000, 600000);      //  10 minute period, delayed 5 minutes
-
-    NoMotionActivityTimer.start(callbackNoMotionActivity, 100000, 7200000);    // low  freq (two hours) timer
-    InMotionActivityTimer.start(callbackInMotionActivity, 100000,   60000);    // high freq (one minute) timer
-
-// For testing
-//    LoRaTimer.start(callbackLoRaTx, 60000, 60000);      //  1 minute period, delayed 1 minutes
-
-//    NoMotionActivityTimer.start(callbackNoMotionActivity, 0, 360000);        // low  freq (five minute) timer
-//    InMotionActivityTimer.start(callbackInMotionActivity, 100000,   60000);  // high freq (one minute) timer
+    LoRaWAN.setTxPower(20);
+    LoRaWAN.setPublicNetwork(true);
+    LoRaWAN.setSaveSession(true);
+    LoRaWAN.setAntennaGain(6.0);
+    LoRaWAN.setSubBand(2); // 1 for MTCAP, 2 for TT gateways
+/* For future implementation    
+    LoRaWAN.onReceive(callback_onReceive);*/
+    LoRaWAN.setDutyCycle(false);
     
+    LoRaWAN.joinOTAA(appEui, appKey, devEui);
+    Serial.print("Sent JoinOTAA to LoRaWan with appEui= "); Serial.print(appEui); Serial.print("; appKey = ");Serial.print(appKey);Serial.print("; devEui = ");Serial.println(devEui);
+    if (LoRaWAN.joined()){
+              Serial.print("TRANSMIT( ");
+              Serial.print("TimeOnAir: ");
+              Serial.print(LoRaWAN.getTimeOnAir());
+              Serial.print(", NextTxTime: ");
+              Serial.print(LoRaWAN.getNextTxTime());
+              Serial.print(", MaxPayloadSize: ");
+              Serial.print(LoRaWAN.getMaxPayloadSize());
+              Serial.print(", DR: ");
+              Serial.print(LoRaWAN.getDataRate());
+              Serial.print(", TxPower: ");
+              Serial.print(LoRaWAN.getTxPower(), 1);
+              Serial.print("dbm, UpLinkCounter: ");
+              Serial.print(LoRaWAN.getUpLinkCounter());
+              Serial.print(", DownLinkCounter: ");
+              Serial.print(LoRaWAN.getDownLinkCounter());
+              Serial.println(" )");
+    };
+    
+    /* For production
+        LoRaTimer.start(callbackLoRaTx, 300000, 600000);      //  10 minute period, delayed 5 minutes
+    
+        NoMotionActivityTimer.start(callbackNoMotionActivity, 100000, 7200000);    // low  freq (two hours) timer
+        InMotionActivityTimer.start(callbackInMotionActivity, 100000,   60000);    // high freq (one minute) timer
+    
+    // For testing
+    /*    LoRaTimer.start(callbackLoRaTx, 60000, 60000);      //  1 minute period, delayed 1 minute
+    
+        NoMotionActivityTimer.start(callbackNoMotionActivity, 0, 360000);        // low  freq (five minute) timer
+        InMotionActivityTimer.start(callbackInMotionActivity, 100000,   60000);  // high freq (one minute) timer
+     */
+    
+    // For production as a vehicle alarm and tracker
+    LoRaTimer.start(callbackLoRaTx, 60000, 60000);      //  1 minute period, delayed 1 minute
+    NoMotionActivityTimer.start(callbackNoMotionActivity, 0, 360000);        // low  freq (five minute) timer
+    InMotionActivityTimer.start(callbackInMotionActivity, 100000,   60000);  // high freq (one minute) timer
+            
     /* end of setup */
 }
 
-void loop()
-{
+void loop(){
+//Serial.println(" ===== Initial LoRaWAN call =====");
+//callbackLoRaTx();
+
+/*    if (LoRaWAN.joined() && !LoRaWAN.busy())
+    {
+        Serial.print("TRANSMIT( ");
+        Serial.print("TimeOnAir: ");
+        Serial.print(LoRaWAN.getTimeOnAir());
+        Serial.print(", NextTxTime: ");
+        Serial.print(LoRaWAN.getNextTxTime());
+        Serial.print(", MaxPayloadSize: ");
+        Serial.print(LoRaWAN.getMaxPayloadSize());
+        Serial.print(", DR: ");
+        Serial.print(LoRaWAN.getDataRate());
+        Serial.print(", TxPower: ");
+        Serial.print(LoRaWAN.getTxPower(), 1);
+        Serial.print("dbm, UpLinkCounter: ");
+        Serial.print(LoRaWAN.getUpLinkCounter());
+        Serial.print(", DownLinkCounter: ");
+        Serial.print(LoRaWAN.getDownLinkCounter());
+        Serial.println(" )");
+
+        LoRaWAN.beginPacket();
+        LoRaWAN.write(0xef);
+        LoRaWAN.write(0xbe);
+        LoRaWAN.write(0xad);
+        LoRaWAN.write(0xde);
+        LoRaWAN.endPacket();
+    } else {
+        Serial.print("NO TRANSMISSION");
+
+    }
+*/
 
   /* BMA400 sleep/wake detect*/
   if(BMA400_wake_flag)
@@ -286,10 +348,11 @@ void loop()
 //{
 //  ppsFlag = false;
 
+
   if(GNSS.location(myLocation))
   {
   Serial.print("LOCATION: ");
-  Serial.print(fixTypeString[myLocation.fixType()]);
+  Serial.println(fixTypeString[myLocation.fixType()]);
 
   if (myLocation.fixType() != GNSSLocation::TYPE_NONE)
   {
@@ -366,6 +429,7 @@ void loop()
                     
                     Serial.println("***GNSS go to sleep!***");
                     GNSS.suspend(); // once we have a good 3D location fix put CAM M8Q to sleep
+                    Serial.println(" ===== LoRaWAN call to update stationary location when GNSS went to sleep =====");
                     callbackLoRaTx();  // update dashboard/backend via LoRaWAN
                 }
            
@@ -375,7 +439,7 @@ void loop()
 
   } 
 
-  Serial.println();
+ // Serial.println();
 
   } /* end of GNSS Location handling */
 
@@ -383,10 +447,8 @@ void loop()
     {
 
     Serial.print("SATELLITES: ");
-    Serial.print(mySatellites.count());
+    Serial.println(mySatellites.count());
   
-    Serial.println();
-
     for (unsigned int index = 0; index < mySatellites.count(); index++)
     {
   unsigned int svid = mySatellites.svid(index);
@@ -535,19 +597,19 @@ void loop()
     digitalWrite(myBat_en, LOW);
     STM32L0Temp = STM32L0.getTemperature();
     if(SerialDebug) {
+      Serial.println(" === Serial debug ===");
       Serial.print("VDDA = "); Serial.print(VDDA, 2); Serial.println(" V");
       Serial.print("VBAT = "); Serial.print(VBAT, 2); Serial.println(" V");
-      Serial.print("STM32L0 MCU Temperature = "); Serial.println(STM32L0Temp, 2);
-      Serial.println(" ");
+      Serial.print("STM32L0 MCU Temperature is "); Serial.print(STM32L0Temp, 2);Serial.println(" degrees C");
+      Serial.println(" === end debug ===");
     }
 
-    tempCount = BMA400.readBMA400TempData();  // Read the accel chip temperature adc values
-    temperature = 0.5f * ((float) tempCount) + 23.0f; // Accel chip temperature in degrees Centigrade
-    // Print temperature in degrees Centigrade      
-    Serial.print("Accel temperature is ");  Serial.print(temperature, 1);  Serial.println(" degrees C"); // Print T values to tenths of s degree C        
+    tempCount = BMA400.readBMA400TempData();  // Read the accel chip Temperature adc values
+    Temperature = 0.5f * ((float) tempCount) + 23.0f; // Accel chip Temperature in degrees Centigrade
+    // Print Temperature in degrees Centigrade      
+    Serial.print("Accel Temperature is ");  Serial.print(Temperature, 2);  Serial.println(" degrees C");   
 
     // Read RTC
-    Serial.println("RTC:");
     RTC.getDate(day, month, year);
     RTC.getTime(hours, minutes, seconds, subSeconds);
 
@@ -567,7 +629,7 @@ void loop()
             Serial.print("0");
         }
     Serial.print(milliseconds);
-    Serial.println(" ");
+    Serial.println();
 
     Serial.print("RTC Date = ");
     Serial.print(year); Serial.print(":"); Serial.print(month); Serial.print(":"); Serial.println(day);
@@ -584,49 +646,116 @@ void loop()
 
 
 /* Useful functions */
+void callbackLoRaTx(void){ 
 
-void callbackLoRaTx(void)
-{     
-/*     // Send some data via LoRaWAN
-      LoRaData[0]  = (uint16_t(temperature_C*100.0) & 0xFF00) >> 8;
-      LoRaData[1]  =  uint16_t(temperature_C*100.0) & 0x00FF;
-      LoRaData[2] =  (uint16_t(pressure*10.0      ) & 0xFF00) >> 8;   
-      LoRaData[3] =   uint16_t(pressure*10.0      ) & 0x00FF;         
-      LoRaData[4] =  (uint16_t(humidity*100.0     ) & 0xFF00) >> 8;
-      LoRaData[5] =   uint16_t(humidity*100.0     ) & 0x00FF;
-      LoRaData[6] =  (uint16_t( (Long + 123.0)*10000.0 ) & 0xFF00) >> 8;
-      LoRaData[7] =   uint16_t( (Long + 123.0)*10000.0 ) & 0x00FF;
-      LoRaData[8] =  (uint16_t( (Lat   - 37.0)*10000.0 ) & 0xFF00) >> 8;
-      LoRaData[9] =   uint16_t( (Lat   - 37.0)*10000.0 ) & 0x00FF;
-      LoRaData[10] =  uint8_t(VBAT*50.0); // maximum should be 4.2 * 50 = 210
-*/
-    if (!LoRaWAN.busy() && LoRaWAN.joined())
-     {
-//        LoRaWAN.beginPacket(3);
-//        LoRaWAN.write(LoRaData, sizeof(LoRaData));
-//        LoRaWAN.endPacket();
+// This boggus data section is only required as long as Huminidy and Pressure sensor is not connected
+  const float Pressure = 1080;
+  const float Humidity = 70;
+  
+  Serial.println(" ====== callbackLoRaTx =====");   
+  // Send some data via LoRaWAN
+  LoRaData[0]  = (uint16_t(STM32L0Temp*100.0) & 0xFF00) >> 8;
+  LoRaData[1]  =  uint16_t(Temperature*100.0) & 0x00FF; //Temperature_C
+  LoRaData[2] =  (uint16_t(Pressure*10.0      ) & 0xFF00) >> 8;   
+  LoRaData[3] =   uint16_t(Pressure*10.0      ) & 0x00FF;         
+  LoRaData[4] =  (uint16_t(Humidity*100.0     ) & 0xFF00) >> 8;
+  LoRaData[5] =   uint16_t(Humidity*100.0     ) & 0x00FF;
+  LoRaData[6] =  (uint16_t( (Long + 123.0)*10000.0 ) & 0xFF00) >> 8;
+  LoRaData[7] =   uint16_t( (Long + 123.0)*10000.0 ) & 0x00FF;
+  LoRaData[8] =  (uint16_t( (Lat   - 37.0)*10000.0 ) & 0xFF00) >> 8;
+  LoRaData[9] =   uint16_t( (Lat   - 37.0)*10000.0 ) & 0x00FF;
+  LoRaData[10] =  uint8_t(VBAT*50.0); // maximum should be 4.2 * 50 = 210
 
-        myLPP.reset();
-        myLPP.addAnalogInput(1, VBAT);
-        myLPP.addGPS(2, Lat, Long, Alt);
-        myLPP.addTemperature(3, STM32L0Temp);
-        myLPP.addTemperature(4, temperature);
-
-        LoRaWAN.sendPacket(myLPP.getBuffer(), myLPP.getSize());
-     }
+  if (LoRaWAN.joined()){
+    Serial.println("===== LoRaWan - Joined =====");
+    Serial.print("TRANSMIT( ");
+    Serial.print("TimeOnAir: ");
+    Serial.print(LoRaWAN.getTimeOnAir());
+    Serial.print(", NextTxTime: ");
+    Serial.print(LoRaWAN.getNextTxTime());
+    Serial.print(", MaxPayloadSize: ");
+    Serial.print(LoRaWAN.getMaxPayloadSize());
+    Serial.print(", DR: ");
+    Serial.print(LoRaWAN.getDataRate());
+    Serial.print(", TxPower: ");
+    Serial.print(LoRaWAN.getTxPower(), 1);
+    Serial.print("dbm, UpLinkCounter: ");
+    Serial.print(LoRaWAN.getUpLinkCounter());
+    Serial.print(", DownLinkCounter: ");
+    Serial.print(LoRaWAN.getDownLinkCounter());
+    Serial.println(" )");
     
+    if (!LoRaWAN.busy()){
+
+       // Send and confirm Cayenne payload on port 1
+       myLPP.reset();
+       myLPP.addGPS(1, Lat, Long, Alt);
+       myLPP.addAnalogInput(2, VBAT);
+        
+       LoRaWAN.beginPacket(1);
+       //LoRaWAN.sendPacket(1,myLPP.getBuffer(), myLPP.getSize());
+       LoRaWAN.write(myLPP.getBuffer(),myLPP.getSize());
+       LoRaWAN.endPacket();
+       
+       while (LoRaWAN.pending()) {
+          Serial.println("LoRaWan - Sending LoRaData and Cayenne LPP packet...");
+          delay(1000);
+       };
+       if (LoRaWAN.confirmed()) {Serial.println("==== LoRaWan - LPP packet sent confirmed ====");};
+       
+       // Send and confirm LoRaData payload on port 2
+       LoRaWAN.beginPacket(2);
+       LoRaWAN.write(LoRaData, sizeof(LoRaData));
+       LoRaWAN.endPacket();
+       
+       while (LoRaWAN.pending()) {
+          Serial.println("LoRaWan - Sending LoRaData...");
+          delay(1000);
+       };
+       if (LoRaWAN.confirmed()) { Serial.println("==== LoRaWan - LoRaData packet sent confirmed ====");};
+     
+     };
+  
+  }; 
+
+// If LoRaWAN is not busy and also not joinned then try rejoin or just join then back to try to send.
+  if (!LoRaWAN.busy()){
+    if (!LoRaWAN.linkGateways()){
+        Serial.println("REJOIN( )"); 
+        LoRaWAN.rejoinOTAA();
+    }
+    else {LoRaWAN.joinOTAA(appEui, appKey);}
+  Serial.println("==== Try sending again after rejoin attempt ====");
+  callbackLoRaTx();
+  };
+/* For future impelmentation (OTA updates)
+  if (onReceive){
+   onReceive = false;
+   Serial.print("RECEIVE( )");
+   if (LoRaWAN.parsePacket()){       
+      uint32_t size;
+      uint8_t data[50];
+      size = LoRaWAN.read(&data[0], sizeof(data));
+      if (size){
+        Serial.print("Outputting received data array: ");
+        for(int i=0;i<size;i++){
+            Serial.print(data[i],HEX);
+        }
+        Serial.println();
+      }
+      delay(1000);
+      STM32L0.reset();  
+    };
+  };*/
 }
 
-
-void callbackNoMotionActivity(void)
-{
+void callbackNoMotionActivity(void){
     GNSS.resume(); // long duty cycle simply resume GNSS after time out
     isTracking = false;
 }
 
 
-void callbackInMotionActivity(void)
-{
+void callbackInMotionActivity(void){
   if(InMotion) // short duty cycle resume GNSS only if motion has been detected since last GNSS.suspend
   {
    InMotion = false;
@@ -637,38 +766,32 @@ void callbackInMotionActivity(void)
 
 
 
-void myinthandler1()
-{
+void myinthandler1(){
   BMA400_wake_flag = true; 
   STM32L0.wakeup();
   Serial.println("** BMA400 is awake! **");
 }
 
 
-void myinthandler2()
-{
+void myinthandler2(){
   BMA400_sleep_flag = true;
   STM32L0.wakeup();
   Serial.println("** BMA400 is asleep! **");
 }
 
 
-void CAMM8QintHandler()
-{
+void CAMM8QintHandler(){
   ppsFlag = true;
   STM32L0.wakeup();
 }
 
 
-void alarmMatch()
-{
+void alarmMatch(){
   alarmFlag = true;
   STM32L0.wakeup();
 }
 
-
-void syncRTC()
-{
+void syncRTC(){
   // Set the time
   RTC.setSeconds(Second);
   RTC.setMinutes(Minute);
@@ -684,3 +807,8 @@ void syncRTC()
   RTC.setMonth(Month);
   RTC.setYear(Year - 2000);
 }
+
+/* For future implementation
+void callback_onReceive(){
+   onReceive = true;
+}*/

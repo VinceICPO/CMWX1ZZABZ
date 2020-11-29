@@ -110,7 +110,7 @@ void BMA400::deactivateNoMotionInterrupt()
 
 void BMA400::CompensationBMA400(uint8_t Ascale, uint8_t SR, uint8_t power_Mode, uint8_t OSR, uint8_t acc_filter, float * offset)
 {
-     Serial.println("hold flat and motionless for bias calibration");
+     Serial.println("Hold flat and motionless for bias calibration");
      delay(5000);
      
      writeByte(BMA400_ADDRESS,BMA400_ACC_CONFIG0, 0x80 | OSR << 5 | power_Mode);// set bandwidth to 0.2x sample rate, OSR in low-power mode, power mode
